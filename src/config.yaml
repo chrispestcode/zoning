@@ -1,0 +1,16 @@
+paths:  # relative to the project root (the folder with pyproject.toml)
+  data: src/corpus
+  evals: src/evals
+  database: src/document_database.db
+  review_queue: src/logs/review_queue.jsonl   # IDs that failed to load, for human review
+  logs:
+    evals: src/logs/evals
+
+urls:
+  qdrant-host: http://localhost:6333
+  ollama-host: http://127.0.0.1:11435/api/generate
+
+models:
+  provider: claude   # ollama | claude (claude reads ANTHROPIC_API_KEY)
+  ollama: qwen3:8b
+  claude: claude-sonnet-4-6
