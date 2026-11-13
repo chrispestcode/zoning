@@ -1,13 +1,7 @@
-import gc
-import os
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-from transformers import AutoTokenizer, AutoModel
-import torch
-import re
-from typing import List, Dict, Any, Tuple
 
-from contracts import Status, DocumentModel
+from models.contracts import Status, DocumentModel
 from document_database import DocumentDatabase
 from utils.device import get_device, clean_device_memory
 from loguru import logger
@@ -32,7 +26,7 @@ class Chunker:
         self.chunker = SemanticChunker(
             embeddings=self.embedding_model,
             breakpoint_threshold_type='percentile',
-            breakpoint_threshold_amount=0.95,
+            breakpoint_threshold_amount=70,
             min_chunk_size=100,
         )
 
@@ -48,7 +42,7 @@ class Chunker:
         documents = db.get_documents(Status.NOT_STARTED)
         return documents
     
-    def _chunk_text(self, data: List[DocumentModel]) -> Tuple[List[int], List[int]]:
+    def _chunk_text(self, data: list[DocumentModel]) -> tuple[list[int], list[int]]:
         """Chunk text and identify associated figure/table references."""
         if not data:
             return [], []

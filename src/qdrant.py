@@ -3,20 +3,17 @@
 from qdrant_client import QdrantClient, models
 from qdrant_client.models import PointStruct, HnswConfigDiff
 from sentence_transformers import SentenceTransformer
-import json
 import torch
-from transformers import CLIPProcessor, CLIPModel
-from contracts import Status
+from models.contracts import Status
 from document_database import DocumentDatabase
 from utils.device import get_device, clean_device_memory
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 from loguru import logger
 import gc
 from dataclasses import dataclass
 import psutil
 import time
 from qdrant_client.http import models
-from collections import Counter
 import numpy as np
 from tqdm import tqdm
 from utils.load_config import get_qdrant_host
@@ -86,16 +83,6 @@ class QdrantManager:
             )
             self.clip_processor = None
             self.clip_model = None
-            # # Initialize CLIP model for cross-modal reranking
-            # self.clip_processor = CLIPProcessor.from_pretrained(
-            #     ModelConfig.clip_model,
-            #     torch_dtype=torch.float16 if self.device == "cuda" else torch.float32
-            # )
-            # self.clip_model = CLIPModel.from_pretrained(
-            #     ModelConfig.clip_model,
-            #     torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            #     device_map="auto"
-            # ).eval()
             print("Models initialized successfully")
         except Exception as e:
             print(f"Error initializing models: {e}")
@@ -104,12 +91,11 @@ class QdrantManager:
     def _initialize_collections(self):
         """Initialize Qdrant collections with optimized settings"""
         try:
-            # Create only missing collections: PROCESSING_COMPLETED chunks are never re-upserted,
-            # so dropping existing collections would lose them.
+
             collections = {
-                "neo_tax_chunks": ("chunks", 1024),
-                "neo_tax_imgs": ("images", 512),
-                "neo_tax_tables": ("tables", 512),
+                "text": ("chunks", 1024),
+                "images": ("images", 512),
+                "tables": ("tables", 512),
             }
             for collection_name, (vector_name, size) in collections.items():
                 if self.qdrant_client.collection_exists(collection_name=collection_name):
@@ -138,11 +124,6 @@ class QdrantManager:
         """Upsert data from SQLite to Qdrant collections with on-the-fly embedding generation and batching"""
         try:
             chunk_rows = self.db.get_chunks(Status.EMBEDDING_COMPLETED)
-            # image_rows = self.db.get_images(DocumentDatabase.Status.EMBEDDING_COMPLETED)
-            # table_rows = self.db.get_tables(DocumentDatabase.Status.EMBEDDING_COMPLETED)
-            # form_rows = self.db.get_forms(DocumentDatabase.Status.EMBEDDING_COMPLETED)
-            
-            # Process chunks with BGE Large in batches
             batch_size = ModelConfig.batch_size
             document_ids = set()
             for batch in tqdm(self._batch_generator(chunk_rows, batch_size), desc="Upserting data..."):
@@ -150,7 +131,6 @@ class QdrantManager:
                 for row in batch:
                     if row.Embedding is None or not isinstance(row.Embedding, bytes):
                         continue
-                    # ChunkId is globally unique; DocumentId * 1000 + ChunkId collides once ChunkId >= 1000
                     point_id = row.ChunkId
                     points.append(PointStruct(
                         id=point_id,
@@ -163,50 +143,13 @@ class QdrantManager:
                     ))
                 if not points:
                     continue
-                self.qdrant_client.upsert(collection_name='neo_tax_chunks', points=points, wait=True)
+                self.qdrant_client.upsert(collection_name='text', points=points, wait=True)
                 self.db.update_chunk_status([p.payload["chunk_id"] for p in points], Status.PROCESSING_COMPLETED)
                 document_ids.update(p.payload["document_id"] for p in points)
                 self._clean_cuda()
 
             completed_ids = self.db.complete_documents(sorted(document_ids))
             logger.debug(f"Updated document status to PROCESSING_COMPLETED for {len(completed_ids)} documents.")
-
-            # Process images and tables with CLIP in batches
-            # for collection, rows in [('neo_tax_imgs', image_rows), ('neo_tax_tables', table_rows)]:
-            #     for batch in self._batch_generator(rows, batch_size):
-            #         points = []
-            #         for row in batch:
-            #             if collection == 'neo_tax_imgs':
-            #                 img_id, doc_id, doc_name, img_type, img_number, img_data, metadata_json, alt_text = row
-            #             else:
-            #                 tbl_id, doc_id, doc_name, tbl_number, tbl_img, markdown, metadata_json, alt_text = row
-            #                 img_data = tbl_img
-                        
-            #             decoded_image = self.processor.decode_image(img_data)
-            #             if decoded_image is None:
-            #                 continue
-
-            #             inputs = self.clip_processor(images=decoded_image, return_tensors="pt").to(self.device)
-            #             with torch.no_grad():
-            #                 features = self.clip_model.get_image_features(**inputs)
-            #             embedding = features.cpu().numpy()
-
-            #             point_id = doc_id * 1000 + (img_number if collection == 'neo_tax_imgs' else tbl_number)
-            #             points.append(PointStruct(
-            #                 id=point_id,
-            #                 vector={'images' if collection == 'neo_tax_imgs' else 'tables': embedding[0].tolist()},
-            #                 payload={
-            #                     "type": "image" if collection == 'neo_tax_imgs' else "table",
-            #                     "doc_name": doc_name,
-            #                     "document_id": doc_id,
-            #                     "item_id": img_id if collection == 'neo_tax_imgs' else tbl_id,
-            #                     "item_number": img_number if collection == 'neo_tax_imgs' else tbl_number,
-            #                     "metadata": json.loads(metadata_json) if metadata_json else {},
-            #                     "alt_text": alt_text
-            #                 }
-            #             ))
-            #         self.qdrant_client.upsert(collection_name=collection, points=points, wait=True)
-            #         self._clean_cuda()
 
             logger.info("Data upserted successfully to Qdrant collections")
             return True
@@ -244,25 +187,24 @@ class QdrantManager:
     def query_qdrant(self, query: str, top_k: int = 10) -> Dict[str, List]:
         """Hybrid search with BGE for text, CLIP for images/tables, then CLIP reranking"""
         try:
-            # Check collection status
+
             collections_status = {
-                "neo_tax_chunks": self._check_collection_status("neo_tax_chunks"),
-                "neo_tax_imgs": self._check_collection_status("neo_tax_imgs"),
-                "neo_tax_tables": self._check_collection_status("neo_tax_tables")
+                "text": self._check_collection_status("text"),
+                "images": self._check_collection_status("images"),
+                "tables": self._check_collection_status("tables")
             }
             
             if not any(collections_status.values()):
                 print("No collections found with data. Please run execute_qdrant() first.")
-                return {"results": []}
+                return []
 
-            # Text retrieval with BGE - increase limit to get more context
             chunk_results = []
-            if collections_status["neo_tax_chunks"]:
+            if collections_status["text"]:
                 chunk_results = self.qdrant_client.query_points(
-                    collection_name="neo_tax_chunks",
+                    collection_name="text",
                     query=self.encode_query_bge(query),
                     using="chunks",
-                    limit=top_k,  # Increased to get more context
+                    limit=top_k,
                     with_payload=True,
                     with_vectors=True
                 ).points
@@ -270,7 +212,7 @@ class QdrantManager:
             return chunk_results
         except Exception as e:
             logger.error(f"Error in search: {e}")
-            return {"results": []}
+            return []
         finally:
             # Clean up resources
             self._clean_cuda()
@@ -288,9 +230,8 @@ def get_qdrant() -> Optional[QdrantManager]:
     try:
         qdrant_manager = QdrantManager()
         print("Qdrant operations completed successfully")
-        if not qdrant_manager._check_collection_status("neo_tax_chunks"):
-            print("No data found in for qdrant collections. Please instantiate QdrantManager() with initialize=True first.")
-            return None
+        if not qdrant_manager._check_collection_status("text"):
+            raise Exception("No data found in for qdrant collections. Please instantiate QdrantManager() with initialize=True first.")
         return qdrant_manager
     except Exception as e:
         logger.error(f"Error in execute_qdrant: {e}")
@@ -299,3 +240,4 @@ def get_qdrant() -> Optional[QdrantManager]:
 if __name__ == "__main__":
     qdrant = get_qdrant()
     results = qdrant.query_qdrant("Information about taxes?")
+    print(results)

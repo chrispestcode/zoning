@@ -48,9 +48,7 @@ class ContentGenerator:
                 prompt=chunk,
                 temperature=0.85,
             )
-            raw = raw.strip().removeprefix("```json").removesuffix("```")
-            derivative_chunks: list[Any] = json.loads(raw)
-            key_points: list[str] =  derivative_chunks.get("key-points", [])
+            key_points: list[str] =  self.format_llm_json_response(raw).get("key-points", [])
             if not key_points:
                 logger.warning("Did not generate derivative chunks for given chunk")
             return key_points
@@ -73,8 +71,7 @@ class ContentGenerator:
                 prompt=text,
                 temperature=0.34,
             )
-            raw = raw.strip().removeprefix("```json").removesuffix("```")
-            qa_pairs: list[Any] = json.loads(raw).get("questions_and_answers", [])
+            qa_pairs: list[Any] = self.format_llm_json_response(raw).get("questions_and_answers", [])
 
             if not qa_pairs:
                 logger.warning("Did not generate QA pairs for given text")
@@ -82,6 +79,34 @@ class ContentGenerator:
         except Exception as exc:
             logger.error(f"get_qa_pairs failed: {exc}")
             return []
+
+    async def run_llm_as_a_judge(self, system:str, context: dict[str, Any]) -> dict[str, str]:
+        """Answer a user query using the supplied context chunks per metric.
+
+        Args:
+            query: The user's question.
+            chunks: Retrieved document chunks to use as evidence.
+
+        Returns:
+            Dict with key ``"text_response"`` containing the answer string.
+            :param context: Required context to inject into metric prompt
+            :param system: System prompt
+        """
+        prompt = ""
+        raw = ""
+        for key,value in context.items():
+                prompt += f'''
+                    <{key.upper()}> <{value}> </{key.upper()}>
+                '''
+        try:
+            raw = await self._backend.generate(
+                system=system,
+                prompt=prompt,
+            )
+        except Exception as exc:
+            logger.error(f"{exc}")
+
+        return self.format_llm_json_response(raw)
 
     async def get_chunk_response(self, query: str, chunks: List[str]) -> dict[str, str]:
         """Answer a user query using the supplied context chunks.
@@ -101,10 +126,16 @@ class ContentGenerator:
             raw = await self._backend.generate(
                 system=RESPONSE_PROMPT,
                 prompt="\n".join(input_parts),
-                temperature=0.85,
             )
-            answer: str = json.loads(raw).get("answer", "")
+
+            answer = self.format_llm_json_response(raw).get('answer', None)
+            if not answer:
+                logger.warning("Did not generate response for given query")
             return {"text_response": answer}
         except Exception as exc:
             logger.error(f"get_chunk_response failed: {exc}")
             return {"text_response": "An error occurred while generating the response."}
+        
+    def format_llm_json_response(self, raw: str) -> dict[str, str]:
+        cleaned = raw.strip(raw.strip().removeprefix("```json").removesuffix("```"))
+        return json.loads(cleaned)

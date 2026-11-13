@@ -47,8 +47,6 @@ class PDFParser:
         finally:
             self._clean_cuda()
 
-
-#TODO: worker logic integrated here
     def get_document_data(self, file_path: str) -> Optional[Any]:
         self._clean_cuda()
         """Process text with memory optimization."""

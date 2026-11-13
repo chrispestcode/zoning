@@ -34,8 +34,7 @@ class ClaudeBackend(LLMBackend):
         Args:
             system: System prompt passed to the model.
             prompt: User prompt content.
-            **kwargs: Optional Claude parameters (e.g. ``temperature``,
-                      ``max_tokens``).
+            **kwargs: Optional Claude parameters.
 
         Returns:
             The model's text response.
@@ -48,7 +47,7 @@ class ClaudeBackend(LLMBackend):
         try:
             message = await self._client.messages.create(
                 model=self._model,
-                max_tokens=1024,
+                max_tokens=max_tokens,
                 system = system,
                 messages=[
                     {

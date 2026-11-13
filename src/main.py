@@ -4,15 +4,16 @@ import os
 import pstats
 
 from document_database import DocumentDatabase
-from parser import PDFParser
-from chunker import Chunker
-from embedding import Embedder
-from content_generator import ContentGenerator
+from pipeline.parser import PDFParser
+from pipeline.chunker import Chunker
+from pipeline.embedding import Embedder
 from utils.load_config import load_config, get_config_path
 from qdrant import QdrantManager
 from aws.aws_session import AwsSession
 from tempfile import TemporaryDirectory as TempDirectory
-from loguru import logger
+from utils.utils import _initialize_logger
+
+logger = _initialize_logger()
 # Instantiate clients
 
 cloud_storage_enabled = False
@@ -66,16 +67,17 @@ def main():
             for name in files:
                 if name.lower().endswith('.pdf'):
                     document_files.append(os.path.join(root, name))
-    parse_files(document_files)
+    #parse_files(document_files)
     logger.info("PARSE COMPLETE")
-    chunk_files()
+    #chunk_files()
     logger.info("CHUNKING COMPLETE")
     # generate_content()
     logger.info("CONTENT GENERATION COMPLETE")
-    generate_embeddings()
+    #generate_embeddings()
     logger.info("EMBEDDING GENERATION COMPLETE")
-    upsert_qdrant()
+    #upsert_qdrant()
     logger.info("QDRANT UPSERT COMPLETE")
+    logger.eval("This work?")
 
 
 if __name__ == "__main__":

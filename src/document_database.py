@@ -2,13 +2,11 @@ import sqlite3
 import json
 import zlib
 from typing import List, Dict, Any, Optional
-from pathlib import Path
-from functools import cache
 from datetime import datetime
 from loguru import logger
 from pydantic import ValidationError
 
-from contracts import (
+from models.contracts import (
     Status,
     DocumentModel,
     ChunkModel,
