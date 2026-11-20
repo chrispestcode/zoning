@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import zlib
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from loguru import logger
@@ -19,7 +20,7 @@ from models.contracts import (
     QAPairCreate,
     QAPairModel,
 )
-from utils.load_config import load_config, get_config_path
+from utils.load_config import get_config
 
 
 class InvalidPathException(Exception):
@@ -39,10 +40,11 @@ class DocumentDatabase:
 
     def __init__(self, db_name= None, initialize_tables = True):
         if not db_name:
-            config = load_config()
-            if not config.get("paths", {}).get("database"):
+            config = get_config()
+            path = config.get_config_path
+            if not Path(path).exists():
                 raise InvalidPathException("Invalid path provided for database")
-            self.db_name = get_config_path(config, "paths", "database").as_posix()
+            self.db_name = path.as_posix()
 
         else:
             self.db_name = db_name
@@ -835,7 +837,7 @@ class DocumentDatabase:
             "error": str(error),
         }
         try:
-            review_path = get_config_path(load_config(), "paths", "review_queue")
+            review_path = get_config().get_config_path(get_config(), "paths", "review_queue")
             review_path.parent.mkdir(parents=True, exist_ok=True)
             with open(review_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")

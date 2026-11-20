@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from llm.base import LLMBackend
 from llm.factory import LLMFactory
 from prompts.system_prompts import DERIVATIVE_PROMPT, QA_PROMPTS, RESPONSE_PROMPT
-from utils.load_config import load_config, get_config_value
+from utils.load_config import get_config
 
 class ContentGenerator:
     """Facade for LLM-based content generation tasks.
@@ -30,7 +30,7 @@ class ContentGenerator:
             backend: Optional pre-built :class:`~llm.base.LLMBackend`. When
                      omitted the factory resolves the backend from config.
         """
-        config = load_config()
+        config = get_config()
         self._backend: LLMBackend = backend or LLMFactory.create(config)
 
     async def get_derivatives_chunks(self, chunk: str) -> list[Any]:

@@ -4,10 +4,10 @@ import os
 import pstats
 
 from document_database import DocumentDatabase
-from pipeline.parser import PDFParser
+from pipeline.parser import PdfParser
 from pipeline.chunker import Chunker
 from pipeline.embedding import Embedder
-from utils.load_config import load_config, get_config_path
+from utils.load_config import get_config, get_config_path
 from qdrant import QdrantManager
 from aws.aws_session import AwsSession
 from tempfile import TemporaryDirectory as TempDirectory
@@ -19,7 +19,7 @@ logger = _initialize_logger()
 cloud_storage_enabled = False
 
 def main():
-    config = load_config()
+    config = get_config()
     document_files = []
     corpus_directory = get_config_path(config, 'paths', 'data')
     if not os.path.exists(corpus_directory):
@@ -27,7 +27,7 @@ def main():
 
 
     def parse_files(document_files):
-        parser = PDFParser()
+        parser = PdfParser()
         for file in document_files:
             parser.process_pdf(file)
     

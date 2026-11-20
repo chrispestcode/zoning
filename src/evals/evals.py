@@ -31,12 +31,13 @@ from content_generator import ContentGenerator
 from models.contracts import DerivativeCreate, QAPairCreate, Status, QAPairModel
 from document_database import DocumentDatabase
 from qdrant import QdrantManager
-from utils.load_config import get_config_path, load_config
+from utils.load_config import get_config
 
 
 # ============================================================================
 # Metrics
 # ============================================================================
+config = get_config()
 
 def calculate_recall(actual: list[int], predicted: list[int]) -> float:
     """Fraction of ground-truth documents that were retrieved."""
@@ -180,10 +181,10 @@ async def run_evaluation_metrics(cg: Union[ContentGenerator|None] , question, co
 # ============================================================================
 
 def _evals_dir() -> Path:
-    return get_config_path(load_config(), 'paths', 'evals')
+    return config.get_config_path(get_config(), 'paths', 'evals')
 
 def _evals_log_dir() -> Path:
-    return get_config_path(load_config(), 'paths', 'logs', 'evals')
+    return config.get_config_path(get_config(), 'paths', 'logs', 'evals')
 
 async def generate_eval_dataset(num_documents: int = 5, num_derivatives: int = 20) -> Path | None:
     """
