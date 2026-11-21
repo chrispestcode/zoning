@@ -1,9 +1,11 @@
+import os
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
-from pipeline.parser import PdfParser, InvalidFileException
-import os
+from unittest.mock import patch
+
+from pipeline.parser import InvalidFileException, PdfParser
+
 
 class PdfParserTest(unittest.TestCase):
     @patch("pipeline.parser.get_config")

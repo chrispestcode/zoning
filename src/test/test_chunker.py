@@ -7,6 +7,7 @@ from frozendict import frozendict
 from models.contracts import DocumentModel, Status
 from pipeline.chunker import Chunker
 
+
 class ChunkerTest(unittest.TestCase):
     
     @patch("pipeline.chunker.clean_device_memory")

@@ -15,3 +15,4 @@ models:
   provider: claude   # ollama | claude (claude reads ANTHROPIC_API_KEY)
   ollama: qwen3:8b
   claude: claude-sonnet-4-6
+  embedding_model: BAAI/bge-large-en-v1.5
