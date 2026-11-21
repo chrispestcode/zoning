@@ -1,4 +1,5 @@
 import os
+from functools import cache
 from pathlib import Path
 
 import yaml
@@ -34,34 +35,43 @@ CONFIG_PATH = resolve_path(os.getenv("CONFIG_PATH", "src/config.yaml"))
 def get_logger():
     return logger
 
+class Config:
+    class ConfigNotFoundError(Exception):
+        pass
 
-def load_config():
-    if not CONFIG_PATH.is_file():
-        raise FileNotFoundError(f"Config file not found: {CONFIG_PATH}")
-    try:
-        with open(CONFIG_PATH, "r") as file:
-            return yaml.safe_load(file)
-    except yaml.YAMLError as e:
-        raise Exception(f"Error parsing YAML file: {e}")
+    def __init__(self):
+        if not CONFIG_PATH.is_file():
+            raise FileNotFoundError(f"Config file not found: {CONFIG_PATH}")
+        try:
+            with open(CONFIG_PATH, "r") as file:
+                self.config = yaml.safe_load(file)
+        except yaml.YAMLError as e:
+            raise self.ConfigNotFoundError(f"Error parsing YAML file: {e}")
 
+    def get_config_path(self, *keys) -> Path:
+        """Like get_config_value, but returns an absolute Path rooted at PROJECT_ROOT."""
+        return resolve_path(self.get_config_value(*keys))
+
+    def get_config_value(self, *keys):
+        path_dict = self.config
+        for key in keys:
+            path_dict = path_dict[key]
+        return os.path.expandvars(path_dict)
+
+@cache
+def get_config():
+    return Config()
 
 def get_data_dir() -> Path:
-    config = load_config()
-    return get_config_path(config, 'paths', 'data')
-
+    config = get_config()
+    return config.get_config_path('paths', 'data')
 
 def get_qdrant_host():
-    config = load_config()
-    return os.path.expandvars(config['urls']['qdrant-host'])
+    config = get_config()
+    return os.path.expandvars(config.get_config_path('urls', 'qdrant-host'))
 
 
-def get_config_value(config, *keys):
-    path_dict = config
-    for key in keys:
-        path_dict = path_dict[key]
-    return os.path.expandvars(path_dict)
 
 
-def get_config_path(config, *keys) -> Path:
-    """Like get_config_value, but returns an absolute Path rooted at PROJECT_ROOT."""
-    return resolve_path(get_config_value(config, *keys))
+
+

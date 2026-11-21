@@ -16,26 +16,28 @@ TODO: precision@k / recall@k, DCG / NDCG, MMR.
 """
 import argparse
 import asyncio
-from unittest.mock import MagicMock
+from typing import Union, Any
 import json
 import random
 from datetime import datetime
 from pathlib import Path
 
+import pandas
 from loguru import logger
 from pydantic import ValidationError
 from tqdm import tqdm
 
 from content_generator import ContentGenerator
-from contracts import DerivativeCreate, QAPairCreate, Status, QAPairModel
+from models.contracts import DerivativeCreate, QAPairCreate, Status, QAPairModel
 from document_database import DocumentDatabase
 from qdrant import QdrantManager
-from utils.load_config import get_config_path, load_config
+from utils.load_config import get_config
 
 
 # ============================================================================
 # Metrics
 # ============================================================================
+config = get_config()
 
 def calculate_recall(actual: list[int], predicted: list[int]) -> float:
     """Fraction of ground-truth documents that were retrieved."""
@@ -113,47 +115,76 @@ def calculate_max_marginal_relevance(actual: list[int], predicted: list[int]) ->
     """
     raise NotImplementedError
 
-def run_evaluation_metrics(question, chunks, answer, expected_answer):
-    # Imported here so retrieval evals still run while ragas is broken against langchain-community 0.4
-    # (ragas 0.4.3 imports langchain_community.chat_models.vertexai, which 0.4 removed).
-    # Aliased because this module's own evaluate() would otherwise shadow ragas's.
-    from datasets import Dataset
-    from ragas import evaluate as ragas_evaluate
-    from ragas.metrics import answer_relevancy, faithfulness, context_precision, context_recall
+async def run_evaluation_metrics(cg: Union[ContentGenerator|None] , question, context, answer, expected_answer) \
+        -> dict[Any, Any]:
+    if cg is None:
+        cg = ContentGenerator()
+    FAITHFULNESS_RUBRIC = ''' 
+    Given the CONTEXT, label the RESPONSE either : 1) ACCEPTABLE if all parts of the RESPONSE
+     is found in the CONTEXT, 2) ACCEPTABLE if RESPONSE references information not found in CONTEXT.
+     INVALID should be used for any malformations. Provide 1-2 sentence rationale for UNACCEPTABLE OR INVALID".
+     Return the answer as a json.
+    
+    <input>
+    <CONTEXT>
+    </CONTEXT>
+    <RESPONSE>
+    </RESPONSE>
+    </input>
+    <output>
+    {"label": "ACCEPTABLE" / "UNACCEPTABLE" / "INVALID",
+    "rationale": str("Provide 1-2 sentence rationale for ACCEPTABLE OR INVALID"}
+    </output>
+    '''
 
-    data = {
-        "question": [question],
-        "contexts": [chunks],
-        "answer": [answer],
-        "ground_truth": [expected_answer],
-    }
+    ANSWER_RELEVANCE_RUBRIC = '''Given the RESPONSE, label the RESPONSE either : 1) ACCEPTABLE if all parts of QUERY
+     is aligned with RESPONSE, 2) UNACCEPTABLE if RESPONSE does not align with the intent of QUERY. INVALID should be 
+     used for any malformations. Provide 1-2 sentence rationale for UNACCEPTABLE OR INVALID".
+     Return the answer as a json.
+    
+    <input>
+    <QUERY>
+    </QUERY>
+    <RESPONSE>
+    </RESPONSE>
+    </input>
+    <output>
+    {"label": "ACCEPTABLE" / "UNACCEPTABLE" / "INVALID",
+    "rationale": str("rationale"}
+    </output> '''
+    evals = {"faithfulness": FAITHFULNESS_RUBRIC, "answer_relevance": ANSWER_RELEVANCE_RUBRIC}
 
-    dataset = Dataset.from_dict(data)
+    evals_results = {}
+    for metric_name, metric_prompt in evals.items():
+        if metric_name == "faithfulness":
+            content = {
+                'CONTEXT': context,
+                'RESPONSE': answer
+            }
+        elif metric_name == "answer_relevance":
+            content = {
+                'QUERY': question,
+                'RESPONSE': answer
+            }
+        else:
+            continue
+        try:
+            result = await cg.run_llm_as_a_judge(metric_prompt, content)
+            evals_results[metric_name] = result
+        except Exception as e:
+            logger.error(f"Metric could not be logged: {metric_name} for {question}")
 
-    # 2. Choose the Ragas metrics you want to evaluate
-    metrics = [
-        faithfulness,
-        answer_relevancy,
-        context_precision,
-        context_recall,
-    ]
-
-    # 3. Run the evaluation
-    result = ragas_evaluate(dataset=dataset, metrics=metrics)
-
-    # 4. Convert results to a pandas DataFrame to inspect or save
-    df = result.to_pandas()
-    return df
+    return evals_results
 
 # ============================================================================
 # Eval set generation
 # ============================================================================
 
 def _evals_dir() -> Path:
-    return get_config_path(load_config(), 'paths', 'evals')
+    return config.get_config_path(get_config(), 'paths', 'evals')
 
 def _evals_log_dir() -> Path:
-    return get_config_path(load_config(), 'paths', 'logs', 'evals')
+    return config.get_config_path(get_config(), 'paths', 'logs', 'evals')
 
 async def generate_eval_dataset(num_documents: int = 5, num_derivatives: int = 20) -> Path | None:
     """
@@ -275,8 +306,12 @@ async def evaluate_generation(eval_file: Path):
     output_dir = _evals_dir()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for idx, item in enumerate(eval_set):
-        # JSONL pairs aren't stored in the QAPair table, so the line index stands in for QAPairId
+    results_dict = {}
+    for idx, item in tqdm(enumerate(eval_set), desc="Running generation metrics..."):
+        # TODO: JSONL pairs aren't stored in the QAPair table, so the line index stands in for QAPairId
+        eval: QAPairModel = None
+
+        # 1. Prepare Eval Dataset
         try:
             eval = QAPairModel(
                 QAPairId=idx,
@@ -292,10 +327,20 @@ async def evaluate_generation(eval_file: Path):
         chunks = [c.ChunkText for c in db.get_chunks_by_ids(chunk_ids)]
         if not chunks:
             logger.warning(f"Eval #{idx}: No derivative chunks found in {eval_file}")
+
+        # 2. Generate response for query
         response = await cg.get_chunk_response(eval.Question, chunks) # chunk response should contain answer as well as citations in bulk.
-        df = run_evaluation_metrics(eval.Question, chunks, response["text_response"], eval.Answer)
-        output_path = output_dir / f"eval_{idx}_{datetime.now():%Y%m%d_%H%M%S}.csv"
-        df.to_csv(output_path, index=False)
+        if not response:
+            logger.error("Eval #{idx}: No response could be generated")
+            continue
+       # Run evaluation metrics
+        results = await run_evaluation_metrics(cg, question=eval.Question, context="|".join(chunks),
+                                               answer=response["text_response"], expected_answer=eval.Answer)
+        results_dict[idx] =  {'question': eval.Question, **results}
+
+    output_path = output_dir / f"evals_{datetime.now():%Y%m%d_%H%M%S}.csv"
+    df = pandas.DataFrame.from_dict(results_dict, orient="index")
+    df.to_csv(output_path, index=False)
 
 
 
@@ -318,7 +363,6 @@ def main() -> None:
     ev = sub.add_parser("evaluate", help="Score retrieval against an eval set")
     ev.add_argument("file", nargs="?", type=Path, help="Eval set JSONL (default: newest in evals folder)")
     ev.add_argument("--top-k", type=int, default=10, help="Results to retrieve per question")
-
     args = parser.parse_args()
     if args.command == "generate":
         asyncio.run(generate_eval_dataset(args.documents, args.derivatives))

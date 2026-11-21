@@ -1,10 +1,11 @@
 paths:  # relative to the project root (the folder with pyproject.toml)
-  data: src/corpus
-  evals: src/evals
-  database: src/document_database.db
-  review_queue: src/logs/review_queue.jsonl   # IDs that failed to load, for human review
+  data: corpus
+  evals: evals
+  database: document_database.db
+  review_queue: logs/review_queue.jsonl   # IDs that failed to load, for human review
   logs:
-    evals: src/logs/evals
+    evals: logs/evals
+  test: test_path
 
 urls:
   qdrant-host: http://localhost:6333

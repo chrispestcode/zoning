@@ -1,10 +1,9 @@
 # Description: This file contains the Embeddings class which is responsible for generating embeddings for text and images.
-import gc
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModel
 import PIL.ImageOps
 import torch
-from contracts import Status
+from models.contracts import Status
 from document_database import DocumentDatabase
 from utils.device import get_device, clean_device_memory
 from typing import List

@@ -1,6 +1,7 @@
 from llm.base import LLMBackend
 from llm.claude_backend import ClaudeBackend
 from llm.ollama_backend import OllamaBackend
+from utils.load_config import Config
 
 
 class LLMFactory:
@@ -15,7 +16,7 @@ class LLMFactory:
     """
 
     @staticmethod
-    def create(config: dict) -> LLMBackend:
+    def create(config: Config) -> LLMBackend:
         """Instantiate the configured LLM backend.
 
         Args:
@@ -29,13 +30,13 @@ class LLMFactory:
         Raises:
             ValueError: If the configured provider is not supported.
         """
-        provider: str = config["models"].get("provider", "ollama")
+        provider: str = config.get_config_value("models","provider", "ollama")
 
         match provider:
             case "ollama":
                 return OllamaBackend(
-                    host=config["urls"]["ollama-host"],
-                    model=config["models"]["ollama"],
+                    host=config.get_config_value("urls","ollama-host"),
+                    model=config.get_config_value("models","ollama")
                 )
             case "claude":
                 return ClaudeBackend(model=config["models"]["claude"])
