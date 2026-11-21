@@ -2,7 +2,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from docling.document_converter import DocumentConverter
 from pipeline.parser import PdfParser, InvalidFileException
 import os
 
@@ -23,19 +22,22 @@ class PdfParserTest(unittest.TestCase):
         self.assertEqual(self.pdf_parser._is_file_path_valid("test.pdf"), expected_path)
 
     def test_is_valid_file_path(self):
+        # (case, base dir, file path, expected path or exception)
         test_cases = [
-            ("/var/www/uploads", "images/photo.pdf", Path("/var/www/uploads/images/photo.pdf")),
-            ("/var/www/uploads", r"images\example.pdf", Path("/var/www/uploads/images/example.pdf")),
-            ("/var/www/uploads", "/etc/passwd.pdf", Path("/var/www/uploads/etc/passwd.pdf")),
-            ("/var/www/uploads", "../../etc/passwd.pdf", InvalidFileException),
-            ("/var/www/uploads", "images/.env", InvalidFileException),
-            ("/var/www/uploads", "file;rm -rf.pdf", InvalidFileException),
-            ("/var/www/uploads", "images/photo.png", InvalidFileException),
-            ("/var/www/uploads", "images/test.xml.pdf", InvalidFileException),
+            ["nested folder", "/var/www/uploads", "images/photo.pdf", Path("/var/www/uploads/images/photo.pdf")],
+            ["backslashes are normalized", "/var/www/uploads", r"images\example.pdf",
+             Path("/var/www/uploads/images/example.pdf")],
+            ["leading slash stays inside base", "/var/www/uploads", "/etc/passwd.pdf",
+             Path("/var/www/uploads/etc/passwd.pdf")],
+            ["parent traversal is rejected", "/var/www/uploads", "../../etc/passwd.pdf", InvalidFileException],
+            ["hidden file is rejected", "/var/www/uploads", "images/.env", InvalidFileException],
+            ["unsafe characters are rejected", "/var/www/uploads", "file;rm -rf.pdf", InvalidFileException],
+            ["non-pdf extension is rejected", "/var/www/uploads", "images/photo.png", InvalidFileException],
+            ["dot in stem is rejected", "/var/www/uploads", "images/test.xml.pdf", InvalidFileException],
         ]
 
-        for base_dir, file_path, expected_result in test_cases:
-            with (self.subTest(base_dir=base_dir, file_path=file_path, expected_result=expected_result)):
+        for case, base_dir, file_path, expected_result in test_cases:
+            with self.subTest(case=case):
                 self.mock_config.get_config_value.return_value = base_dir
                 if expected_result is InvalidFileException:
                     with self.assertRaises(expected_result):
@@ -46,8 +48,10 @@ class PdfParserTest(unittest.TestCase):
     @patch.object(PdfParser, "_is_file_path_valid")
     def test_get_document_data(self, mock_is_file_path_valid):
         mock_db = self.mock_document_database.return_value
+        # (case, file path, already processed, expected stem, converted document body, expected result)
         test_cases = [
             [
+                "new file is converted",
                 "test.pdf",
                 False,
                 "test",
@@ -55,6 +59,7 @@ class PdfParserTest(unittest.TestCase):
                 {"filename": "test", "document_type": "PDF", "document": "dummy data"},
             ],
             [
+                "already processed file is not converted",
                 "test.pdf",
                 True,
                 "test",
@@ -67,16 +72,13 @@ class PdfParserTest(unittest.TestCase):
             ],
         ]
 
-        for idx, (file_path, is_processed, expected_stem, expected_document_body, expected_result) in enumerate(test_cases):
-            with self.subTest(file_path=file_path,
-                              is_processed=is_processed,
-                              expected_stem=expected_stem,
-                              expected_document_body=expected_document_body,
-                              expected_result=expected_result):
+        for case, file_path, is_processed, expected_stem, expected_document_body, expected_result in test_cases:
+            with self.subTest(case=case):
                 mock_db.is_file_processed.reset_mock()
                 mock_db.is_file_processed.return_value = is_processed
                 mock_is_file_path_valid.reset_mock()
                 mock_is_file_path_valid.return_value = file_path
+                self.mock_converter.convert.reset_mock()
 
                 converted_doc = self.mock_converter.convert.return_value
                 with tempfile.TemporaryDirectory() as tmp_dir:
@@ -89,18 +91,23 @@ class PdfParserTest(unittest.TestCase):
                         with self.assertRaises(expected_result):
                             self.pdf_parser.get_document_data(file_path=file_path)
                     else:
-                        converted_doc.document = expected_document_body
                         result = self.pdf_parser.get_document_data(file_path=file_path)
 
                         self.assertEqual(
                             result,
                             expected_result
                         )
+                        if is_processed:
+                            self.mock_converter.convert.assert_not_called()
+                        else:
+                            self.mock_converter.convert.assert_called_once_with(file_path)
 
     @patch.object(PdfParser, "get_document_data")
     def test_process_pdf(self, mock_get_document_data):
+        # (case, file name, id returned by insert_document, document data, expected result)
         test_cases = [
             [
+                "document is inserted",
                 "test.pdf",
                 7,
                 {
@@ -110,21 +117,22 @@ class PdfParserTest(unittest.TestCase):
                 },
                 7,
             ],
-            ["test.pdf", 7, None, -1],
-            ["test.pdf",
+            ["no document data", "test.pdf", 7, None, -1],
+            [
+                "insert fails",
+                "test.pdf",
                 -1,
                 {
                     "filename": "test.pdf",
                     "document_type": "PDF",
                     "document": "dummy data",
                 },
-                 -1
-             ],
-            ]
+                -1,
+            ],
+        ]
 
-        for filename, document_id, test_data, expected_result in test_cases:
-            with self.subTest(filename=filename, test_data=test_data, document_id=document_id,
-                              expected_result=expected_result):
+        for case, filename, document_id, test_data, expected_result in test_cases:
+            with self.subTest(case=case):
 
                 mock_db = self.mock_document_database.return_value
                 mock_db.insert_document.return_value = document_id

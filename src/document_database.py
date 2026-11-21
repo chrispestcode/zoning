@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import zlib
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -48,14 +49,56 @@ class DocumentDatabase:
 
         else:
             self.db_name = db_name
+
+        self._transaction_conn: Optional[sqlite3.Connection] = None
         if initialize_tables:
             self.create_tables()
 
 
+    @contextmanager
     def get_connection(self):
-        """Get a database connection with optimized settings"""
+        """
+        Yield a connection. Outside a transaction it commits on success, rolls back on
+        error and closes. Inside transaction() it yields the shared connection and leaves
+        commit/rollback to the transaction.
+        """
+        if self._transaction_conn is not None:
+            yield self._transaction_conn
+            return
         conn = sqlite3.connect(self.db_name)
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    # WARNING: "Not thread-safe: one DocumentDatabase instance per thread."
+    @contextmanager
+    def transaction(self):
+        """
+        Make several DAO calls atomic: they all commit together, or all roll back if
+        any raises. Nested transaction() blocks join the outer one.
+
+        Example:
+            with db.transaction():
+                db.insert_chunks(chunks, Status.CHUNKING_COMPLETED)
+                db.update_document_status([document_id], Status.CHUNKING_COMPLETED)
+        """
+        if self._transaction_conn is not None:
+            yield
+            return
+        with self.get_connection() as conn:
+            self._transaction_conn = conn
+            try:
+                yield
+            finally:
+                self._transaction_conn = None
+
+    def _in_transaction(self) -> bool:
+        return self._transaction_conn is not None
 
     def create_tables(self):
         """Create tables with optimized indexes"""
@@ -236,6 +279,7 @@ class DocumentDatabase:
     def insert_chunks(self, chunks: List[Dict[str, Any]], status: Status = Status.NOT_STARTED) -> List[int]:
         """
         Insert chunks one by one, logger errors for failed rows.
+        Inside transaction() a failed row raises instead, so the whole transaction rolls back.
         """
         if not chunks:
             return []
@@ -255,12 +299,15 @@ class DocumentDatabase:
                             chunk.get('Embedding', None),
                             status.value
                         ))
-                        conn.commit()
                         inserted_ids.append(cursor.lastrowid)
                     except sqlite3.Error as row_e:
                         logger.error(f"Failed to insert chunk {chunk}: {row_e}")
+                        if self._in_transaction():
+                            raise
         except sqlite3.Error as e:
             logger.error(f"Error inserting chunks: {e}")
+            if self._in_transaction():
+                raise
         return inserted_ids
 
     def insert_images(self, document_id: int, images: List[Dict[str, Any]]) -> List[int]:
@@ -794,31 +841,31 @@ class DocumentDatabase:
         """
         unique_ids = list(dict.fromkeys(chunk_ids))
         found: Dict[int, ChunkModel] = {}
+        # Per-batch errors are handled inside; this outer except only sees connection failures
         try:
-            conn = self.get_connection()
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                for start in range(0, len(unique_ids), batch_size):
+                    batch = unique_ids[start:start + batch_size]
+                    placeholders = ','.join('?' * len(batch))
+                    try:
+                        cursor.execute(f'SELECT * FROM Chunk WHERE ChunkId IN ({placeholders})', batch)
+                        rows = cursor.fetchall()
+                    except sqlite3.Error as e:
+                        self._record_failed_ids("Chunk", batch, e)
+                        continue
+                    columns = [description[0] for description in cursor.description]
+                    for row in rows:
+                        record = dict(zip(columns, row))
+                        try:
+                            chunk = ChunkModel(**record)
+                        except ValidationError as e:
+                            self._record_failed_ids("Chunk", [record.get("ChunkId")], e)
+                            continue
+                        found[chunk.ChunkId] = chunk
         except sqlite3.Error as e:
             self._record_failed_ids("Chunk", unique_ids, e)
             return []
-        with conn:
-            cursor = conn.cursor()
-            for start in range(0, len(unique_ids), batch_size):
-                batch = unique_ids[start:start + batch_size]
-                placeholders = ','.join('?' * len(batch))
-                try:
-                    cursor.execute(f'SELECT * FROM Chunk WHERE ChunkId IN ({placeholders})', batch)
-                    rows = cursor.fetchall()
-                except sqlite3.Error as e:
-                    self._record_failed_ids("Chunk", batch, e)
-                    continue
-                columns = [description[0] for description in cursor.description]
-                for row in rows:
-                    record = dict(zip(columns, row))
-                    try:
-                        chunk = ChunkModel(**record)
-                    except ValidationError as e:
-                        self._record_failed_ids("Chunk", [record.get("ChunkId")], e)
-                        continue
-                    found[chunk.ChunkId] = chunk
         return [found[cid] for cid in chunk_ids if cid in found]
 
     def _record_failed_ids(self, table: str, ids: List[int], error: Exception) -> None:
@@ -947,6 +994,7 @@ class DocumentDatabase:
     def update_document_status(self, document_ids: List[int], status: Status = Status.PROCESSING_COMPLETED) -> List[int]:
         """
         Updates the status of the specified document
+        Inside transaction() an error raises instead, so the whole transaction rolls back.
         """
         try:
             with self.get_connection() as conn:
@@ -959,11 +1007,12 @@ class DocumentDatabase:
                         "WHERE DocumentId = ?",
                         (status.value, document_id),
                     )
-                    conn.commit()
                     updated_ids.append(document_id)
                 return updated_ids
         except sqlite3.Error as e:
             logger.error(f"Error updating documents: {e}")
+            if self._in_transaction():
+                raise
             return []
 
     def complete_documents(self, document_ids: List[int]) -> List[int]:

@@ -10,6 +10,7 @@ from tqdm import tqdm
 from pathlib import Path
 from utils.load_config import get_config
 from loguru import logger
+from utils.device import get_device
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -27,7 +28,7 @@ class PdfParser:
     output = Path("/home/tchrisp/logs/results.log")
 
     # Initialize PDFParser.device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_device()
 
     def __init__(self):
         self._initialize_models()

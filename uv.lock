@@ -895,6 +895,15 @@ wheels = [
 ]
 
 [[package]]
+name = "frozendict"
+version = "2.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ed/45/7335e29396dde7c9ec00c4758c46bb7d4a9f07ca0a351ae58b814ca6b6a4/frozendict-2.5.1.tar.gz", hash = "sha256:b79b0c133220c5976ff05b8bfe3c1215119caa6255f477a309151fd5e2c2c0c3", size = 337443, upload-time = "2026-10-30T20:37:01.879Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/60/98/0902e074fb777b4064594a3a18773a50d661dbb8d73b7487fdf63ba088cc/frozendict-2.5.1-py3-none-any.whl", hash = "sha256:b6e602e286b912beca1e12615f50eda6c74646b440c8cfde34221adee6c98c5e", size = 18055, upload-time = "2026-10-30T20:37:00.614Z" },
+]
+
+[[package]]
 name = "frozenlist"
 version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5075,6 +5084,7 @@ dependencies = [
     { name = "dataset" },
     { name = "docling" },
     { name = "fastapi" },
+    { name = "frozendict" },
     { name = "huggingface-hub" },
     { name = "jsonl2json" },
     { name = "langchain" },
@@ -5107,6 +5117,7 @@ requires-dist = [
     { name = "dataset", specifier = ">=2.0.0" },
     { name = "docling", specifier = ">=2.144.0" },
     { name = "fastapi", specifier = ">=0.162.0" },
+    { name = "frozendict", specifier = ">=2.5.1" },
     { name = "huggingface-hub", extras = ["cli"], specifier = ">=1.33.0" },
     { name = "jsonl2json", specifier = ">=1.0.0" },
     { name = "langchain", specifier = ">=1.4.7" },
