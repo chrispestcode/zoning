@@ -1,21 +1,19 @@
-from typing import Optional
-
-import torch
 import gc
 import os
 import re
 import time
-from tqdm import tqdm
-
 from pathlib import Path
-from utils.load_config import get_config
-from loguru import logger
-from utils.device import get_device
-from docling.document_converter import DocumentConverter, PdfFormatOption
+
+import torch
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from loguru import logger
+from tqdm import tqdm
 
 from document_database import DocumentDatabase
+from utils.device import get_device
+from utils.load_config import get_config
 
 
 class InvalidFileException(Exception):

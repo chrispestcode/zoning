@@ -1,25 +1,26 @@
-import sqlite3
 import json
+import sqlite3
 import zlib
 from contextlib import contextmanager
-from pathlib import Path
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from loguru import logger
 from pydantic import ValidationError
 
 from models.contracts import (
-    Status,
-    DocumentModel,
     ChunkModel,
-    ImageModel,
-    TableDataModel,
-    FormModel,
-    MetadataModel,
     DerivativeCreate,
     DerivativeModel,
+    DocumentModel,
+    FormModel,
+    ImageModel,
+    MetadataModel,
     QAPairCreate,
     QAPairModel,
+    Status,
+    TableDataModel,
 )
 from utils.load_config import get_config
 

@@ -1,11 +1,12 @@
-from langchain_experimental.text_splitter import SemanticChunker
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-
-from models.contracts import Status, DocumentModel
-from document_database import DocumentDatabase
-from utils.device import get_device, clean_device_memory
-from loguru import logger
 from sqlite3 import Error as SqliteError
+
+from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_experimental.text_splitter import SemanticChunker
+from loguru import logger
+
+from document_database import DocumentDatabase
+from models.contracts import DocumentModel, Status
+from utils.device import clean_device_memory, get_device
 
 IMAGE_RESOLUTION_SCALE = 2.0
 
